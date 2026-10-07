@@ -1,23 +1,25 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
-import { RetailerProcessor } from './retailer.processor';
+import {
+  CLEANUP_JOB_OPTIONS,
+  RETAILER_QUEUE,
+  RETRY_JOB_OPTIONS,
+} from '../common/constants';
 import { HtmlParserModule } from '../htmlParser/htmlParser.module';
+import { TrackersModule } from '../trackers/trackers.module';
+import { RetailerProcessor } from './retailer.processor';
+import { RetailerService } from './retailer.service';
 
 @Module({
-    imports: [
-        BullModule.registerQueue({
-            name: 'retailer-queue',
-            defaultJobOptions: {
-                attempts: 3,
-                backoff: {
-                    type: 'exponential',
-                    delay: 1000,
-                },
-            },
-        }),
-        HtmlParserModule,
-    ],
-    providers: [RetailerProcessor],
-    exports: [BullModule],
+  imports: [
+    BullModule.registerQueue({
+      name: RETAILER_QUEUE,
+      defaultJobOptions: { ...RETRY_JOB_OPTIONS, ...CLEANUP_JOB_OPTIONS },
+    }),
+    HtmlParserModule,
+    TrackersModule,
+  ],
+  providers: [RetailerProcessor, RetailerService],
+  exports: [BullModule, RetailerService],
 })
-export class RetailerModule { }
+export class RetailerModule {}
