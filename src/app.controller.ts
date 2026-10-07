@@ -1,45 +1,103 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
-import { AppService } from './app.service';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  DefaultValuePipe,
+  Get,
+  HttpCode,
+  Inject,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { STATE_STORE } from './common/constants';
+import { Tracker } from './common/types';
+import type { StateStore } from './state/state.store';
+import { RetailerService } from './retailer/retailer.service';
+import {
+  InvalidTrackerError,
+  TrackersService,
+  validateTracker,
+} from './trackers/trackers.service';
 
 @Controller()
 export class AppController {
   constructor(
-    private readonly appService: AppService,
-    @InjectQueue('retailer-queue') private retailerQueue: Queue,
-  ) { }
+    private readonly retailerService: RetailerService,
+    private readonly trackers: TrackersService,
+    @Inject(STATE_STORE) private readonly store: StateStore,
+  ) {}
 
   @Get()
-  getHello(): string {
-    return this.appService.getHello();
+  getInfo() {
+    return {
+      name: 'GPU Tracker and Alert System',
+      endpoints: [
+        'GET /health',
+        'GET /trackers',
+        'GET /snapshots',
+        'GET /alerts',
+        'POST /poll',
+        'POST /poll/all',
+      ],
+    };
   }
 
-  @Post('poll')
-  async pollRetailer(
-    @Body('gpuModel') gpuModel: string,
-    @Body('retailers') retailers: { name: string; url: string }[],
-  ) {
-    if (!gpuModel || !retailers || retailers.length === 0) {
-      return { message: 'gpuModel and retailers list are required' };
-    }
+  @Get('health')
+  health() {
+    return { status: 'ok' };
+  }
 
-    const job = await this.retailerQueue.add(
-      'poll_retailer',
-      { gpuModel, retailers },
-      {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 1000,
-        },
-      },
-    );
+  @Get('trackers')
+  getTrackers() {
+    try {
+      return this.trackers.getTrackers();
+    } catch (error) {
+      throw new BadRequestException(
+        `Invalid trackers file: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /** Latest known price/availability for every tracked product. */
+  @Get('snapshots')
+  getSnapshots() {
+    return this.store.listSnapshots();
+  }
+
+  @Get('alerts')
+  getAlerts(
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
+  ) {
+    return this.store.listAlerts(Math.min(Math.max(limit, 1), 500));
+  }
+
+  /** Ad-hoc poll: { gpuModel, targetPrice?, retailers: [{ name, url, selectors? }] } */
+  @Post('poll')
+  @HttpCode(202)
+  async pollRetailer(@Body() body: unknown) {
+    let tracker: Tracker;
+    try {
+      tracker = validateTracker(body, 'body');
+    } catch (error) {
+      if (error instanceof InvalidTrackerError)
+        throw new BadRequestException(error.message);
+      throw error;
+    }
+    const jobs = await this.retailerService.enqueueTrackers([tracker]);
     return {
-      message: 'Job added',
-      jobId: job.id,
-      gpuModel,
-      retailerCount: retailers.length,
+      message: 'Jobs added',
+      jobIds: jobs.map((j) => j.id),
+      gpuModel: tracker.gpuModel,
+      retailerCount: tracker.retailers.length,
     };
+  }
+
+  /** Poll every configured tracker right now instead of waiting for the schedule. */
+  @Post('poll/all')
+  @HttpCode(202)
+  async pollAll() {
+    const job = await this.retailerService.enqueuePollAll();
+    return { message: 'Job added', jobId: job.id };
   }
 }

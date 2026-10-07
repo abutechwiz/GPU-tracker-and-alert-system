@@ -1,26 +1,62 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
+import {
+  ALERT_QUEUE,
+  HTML_PARSER_QUEUE,
+  JOB_EVALUATE_SNAPSHOT,
+  JOB_PARSE_HTML,
+  RETRY_JOB_OPTIONS,
+} from '../common/constants';
+import { ParseHtmlJobData, ProductSnapshot } from '../common/types';
+import { parseProductPage } from './product-parser';
 
-@Processor('html-parser-queue')
+@Processor(HTML_PARSER_QUEUE)
 export class HtmlParserProcessor extends WorkerHost {
   private readonly logger = new Logger(HtmlParserProcessor.name);
 
-  async process(job: Job<any, any, string>): Promise<any> {
-    switch (job.name) {
-      case 'parse_html':
-        return this.handleParseHtml(job);
-      default:
-        this.logger.warn(`Unknown job name: ${job.name}`);
-    }
+  constructor(@InjectQueue(ALERT_QUEUE) private readonly alertQueue: Queue) {
+    super();
   }
 
-  private async handleParseHtml(job: Job<{ html: string }>) {
-    this.logger.log(`Processing job ${job.id}: Parsing HTML content`);
-    // Here we would implement real parsing, e.g. using cheerio
-    // For now, we simulate work
-    const htmlLength = job.data.html ? job.data.html.length : 0;
-    this.logger.log(`Parsed HTML. Length: ${htmlLength}`);
-    return { success: true, length: htmlLength };
+  async process(
+    job: Job<ParseHtmlJobData>,
+  ): Promise<ProductSnapshot | undefined> {
+    if (job.name !== JOB_PARSE_HTML) {
+      this.logger.warn(`Unknown job name: ${job.name}`);
+      return undefined;
+    }
+    return this.handleParseHtml(job);
+  }
+
+  private async handleParseHtml(job: Job<ParseHtmlJobData>) {
+    const { html, retailer, gpuModel, targetPrice, fetchedAt } = job.data;
+    const parsed = parseProductPage(html ?? '', retailer.selectors);
+
+    const snapshot: ProductSnapshot = {
+      ...parsed,
+      gpuModel,
+      retailer: retailer.name,
+      url: retailer.url,
+      targetPrice,
+      checkedAt: fetchedAt,
+    };
+
+    if (parsed.price === null && parsed.inStock === null) {
+      this.logger.warn(
+        `Could not extract price or availability for ${gpuModel} from ${retailer.name} (${retailer.url}); consider adding "selectors" for this retailer`,
+      );
+    } else {
+      this.logger.log(
+        `Parsed ${gpuModel} @ ${retailer.name}: inStock=${parsed.inStock} price=${parsed.price} ${parsed.currency ?? ''}`,
+      );
+    }
+
+    await this.alertQueue.add(
+      JOB_EVALUATE_SNAPSHOT,
+      snapshot,
+      RETRY_JOB_OPTIONS,
+    );
+    return snapshot;
   }
 }

@@ -1,10 +1,10 @@
 {
-  "name": "GPU Tracker and Alert System",
+  "name": "gpu-tracker-and-alert-system",
   "version": "0.0.1",
-  "description": "",
+  "description": "Tracks GPU prices and availability across retailers and sends alerts on restocks and price drops",
   "author": "",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -17,16 +17,18 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\""
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
-    "@nestjs/schedule": "^6.1.0",
     "axios": "^1.13.2",
     "bullmq": "^5.66.4",
+    "cheerio": "^1.2.0",
+    "ioredis": "^5.8.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
@@ -36,7 +38,6 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
-    "@types/cron": "^2.0.1",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",

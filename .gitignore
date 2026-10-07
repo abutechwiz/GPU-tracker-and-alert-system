@@ -53,3 +53,9 @@ build/config\.gypi
 .npmrc
 pnpm-lock.yaml
 /.history
+# build output
+/dist
+
+# local configuration
+.env
+config/trackers.json

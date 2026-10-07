@@ -1,49 +1,33 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Queue } from 'bullmq';
+import { AppConfig } from '../config/app-config';
+import {
+  JOB_POLL_ALL,
+  POLL_SCHEDULER_ID,
+  RETAILER_QUEUE,
+} from '../common/constants';
 
+/**
+ * Registers a BullMQ job scheduler that enqueues a poll_all job on POLL_CRON
+ * (every 5 minutes by default). Because the schedule lives in Redis, running
+ * several app instances does not cause duplicate polls.
+ */
 @Injectable()
-export class SchedulerService {
-    private readonly logger = new Logger(SchedulerService.name);
+export class SchedulerService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(SchedulerService.name);
 
-    constructor(@InjectQueue('retailer-queue') private retailerQueue: Queue) { }
+  constructor(
+    private readonly config: AppConfig,
+    @InjectQueue(RETAILER_QUEUE) private readonly retailerQueue: Queue,
+  ) {}
 
-    @Cron(CronExpression.EVERY_5_MINUTES)
-    async handleCron() {
-        this.logger.debug('Running scheduled retail poll');
-
-        // In a real app, this would come from a database or config
-        const gpuModel = 'RTX 4090';
-        const retailers = [
-            {
-                name: 'MDComputers',
-                url: 'https://mdcomputers.in/', // Placeholder
-            },
-            {
-                name: 'EliteHubs',
-                url: 'https://elitehubs.com/', // Placeholder
-            },
-            {
-                name: 'PrimeABGB',
-                url: 'https://www.primeabgb.com/', // Placeholder
-            },
-        ];
-
-        await this.retailerQueue.add(
-            'poll_retailer',
-            {
-                gpuModel,
-                retailers,
-            },
-            {
-                attempts: 3,
-                backoff: {
-                    type: 'exponential',
-                    delay: 1000,
-                },
-            },
-        );
-        this.logger.log(`Added scheduled poll job for ${gpuModel}`);
-    }
+  async onApplicationBootstrap() {
+    await this.retailerQueue.upsertJobScheduler(
+      POLL_SCHEDULER_ID,
+      { pattern: this.config.pollCron },
+      { name: JOB_POLL_ALL, data: {} },
+    );
+    this.logger.log(`Polling trackers on schedule "${this.config.pollCron}"`);
+  }
 }
